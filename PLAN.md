@@ -22,9 +22,9 @@ two are not the same question.
 
 ## Hard invariant
 
-**Nothing labelled `measured` may be printed unless the operation was
+Nothing labelled `measured` may be printed unless the operation was
 attempted during this run, and nothing labelled `observed` may be printed
-unless it was read from a file that exists.** A tool that guesses and
+unless it was read from a file that exists. A tool that guesses and
 labels the guess as a measurement is worse than no tool, because it is
 the reassurance that stops someone checking.
 
@@ -35,21 +35,21 @@ those are attacker-controlled.
 
 ## Oracle, ranked by how little we control it
 
-1. **A process whose confinement we constructed.** `unshare` and
+1. A process whose confinement we constructed. `unshare` and
    `setpriv` build a process with exactly known namespaces, capability
    sets and `no_new_privs`, and confine must report exactly that and
    nothing else. This is the strongest oracle available because the
    ground truth is not an opinion.
-2. **The kernel's answer to an attempted operation.** For the `measured`
+2. The kernel's answer to an attempted operation. For the `measured`
    lines there is no second opinion to want: either the open succeeded or
    it returned EACCES.
-3. **`lsns`** from util-linux, for namespace identity. Its inode numbers
+3. `lsns` from util-linux, for namespace identity. Its inode numbers
    must match ours for every namespace of every process it lists.
-4. **`setpriv --dump`**, for the capability sets of the current process.
-5. **`/usr/include/linux/capability.h`**, for the capability name table.
+4. `setpriv --dump`, for the capability sets of the current process.
+5. `/usr/include/linux/capability.h`, for the capability name table.
    The table is generated from the header at build time, never typed in,
    so a kernel that adds CAP_ANYTHING does not silently become "cap 41".
-6. **`systemd-analyze security`**, for units. Ranked last because it
+6. `systemd-analyze security`, for units. Ranked last because it
    scores rather than reports, and its scoring is an opinion.
 
 ## Non-goals
