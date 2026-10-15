@@ -68,11 +68,11 @@ those are attacker-controlled.
 
 ## Commit sequence
 
-- [ ] 01 the capability name table, generated from the kernel header
+- [x] 01 the capability name table, generated from the kernel header
       why: everything else prints names, and a table typed by hand is a
            table that rots. Generating it first means the rot cannot
            start.
-- [ ] 02 `confine PID`: capability sets and no_new_privs, observed
+- [x] 02 `confine PID`: capability sets and no_new_privs, observed
       why: the smallest complete fact, four bitmasks and a flag, with
            setpriv --dump as an oracle for the current process.
 - [ ] 03 namespaces: which of the eight, and whether each is shared with
