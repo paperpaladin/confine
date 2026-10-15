@@ -8,12 +8,19 @@
  *
  * Usage: confine [PID]
  */
+/* readlink and access are POSIX, not ISO C, and -std=c11 hides them.
+ * The macro rather than -std=gnu11: the rest of this collection builds
+ * with c11 and a strict mode that quietly turns into a loose one is a
+ * difference nobody notices until something else breaks. */
+#define _POSIX_C_SOURCE 200809L
+
 #include <ctype.h>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "caps.h"
 
@@ -84,6 +91,83 @@ static void print_caps(const char *label, const char *hex)
 	putchar('\n');
 }
 
+
+/* The eight namespace kinds, plus the two "_for_children" links, which
+ * are not namespaces a process is in but the ones its children will get.
+ * Reported separately because confusing them is easy and the difference
+ * matters exactly when someone has just called unshare. */
+static const char *const NS_KIND[] = {
+	"cgroup", "ipc", "mnt", "net", "pid", "time", "user", "uts",
+	"pid_for_children", "time_for_children",
+};
+
+static int ns_inode(const char *pid, const char *kind, char *out, size_t n)
+{
+	char path[96], link[128];
+	ssize_t k;
+	char *lb, *rb;
+
+	if (snprintf(path, sizeof path, "/proc/%s/ns/%s", pid, kind)
+	    >= (int)sizeof path)
+		return -1;
+	if ((k = readlink(path, link, sizeof link - 1)) < 0)
+		return -1;
+	link[k] = 0;
+	/* "mnt:[4026531840]" and nothing else is accepted: a link that does
+	 * not have this shape is a kernel we do not understand, and
+	 * guessing at it would be worse than saying so. */
+	if (!(lb = strchr(link, '[')) || !(rb = strchr(lb, ']')))
+		return -1;
+	*rb = 0;
+	if (snprintf(out, n, "%s", lb + 1) >= (int)n)
+		return -1;
+	return 0;
+}
+
+/* Whether the target shares a namespace with PID 1 is the fact a reader
+ * wants, and on an ordinary unprivileged run /proc/1/ns is not readable,
+ * so it cannot be had. Saying "not shared with init" when the truth is
+ * "could not look" is the failure this whole program is shaped against,
+ * so the comparison is against this process instead, and the output says
+ * which comparison it made. */
+static void print_namespaces(const char *pid)
+{
+	char mine[64], theirs[64];
+	size_t i;
+	int init_readable = access("/proc/1/ns/mnt", R_OK) == 0;
+	/* Comparing the target against ourselves is meaningless when the
+	 * target IS ourselves: it reports "same as this process" for every
+	 * namespace including one that unshare just created, which reads
+	 * like a fact and is a tautology. The first version did exactly
+	 * that and looked right. */
+	int is_self = !strcmp(pid, "self") || atoi(pid) == (int)getpid();
+
+	for (i = 0; i < sizeof NS_KIND / sizeof *NS_KIND; i++) {
+		const char *k = NS_KIND[i];
+		char label[32];
+
+		if (ns_inode(pid, k, theirs, sizeof theirs) != 0)
+			continue;
+		snprintf(label, sizeof label, "ns_%s", k);
+		printf("observed  %-14s %-12s", label, theirs);
+		if (init_readable && ns_inode("1", k, mine, sizeof mine) == 0)
+			printf(" %s init\n",
+			       strcmp(mine, theirs) ? "not shared with" : "shared with");
+		else if (!is_self && ns_inode("self", k, mine, sizeof mine) == 0)
+			printf(" %s this process\n",
+			       strcmp(mine, theirs) ? "differs from" : "same as");
+		else
+			putchar('\n');
+	}
+	if (!init_readable)
+		printf("observed  note           /proc/1/ns is not readable here, so "
+		       "no namespace\n                         can be compared against "
+		       "init%s\n", is_self ? ". Inspecting this process, so\n"
+		       "                         there is nothing else to compare "
+		       "against either" : ". They are compared against\n"
+		       "                         this process instead");
+}
+
 static const char *seccomp_mode(const char *s)
 {
 	switch (atoi(s)) {
@@ -126,6 +210,8 @@ int main(int argc, char **argv)
 	for (i = 0; i < sizeof CAPSETS / sizeof *CAPSETS; i++)
 		if (status_field(pid, CAPSETS[i].key, buf, sizeof buf) == 0)
 			print_caps(CAPSETS[i].label, buf);
+
+	print_namespaces(pid);
 
 	if (status_field(pid, "NoNewPrivs", buf, sizeof buf) == 0)
 		printf("observed  %-14s %s\n", "no_new_privs", buf);

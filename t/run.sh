@@ -115,6 +115,95 @@ if command -v setpriv >/dev/null 2>&1; then
 	eq "and without it, as 0" "0" "$got"
 fi
 
+# ----------------------------------------------- oracle: lsns, namespaces
+# lsns prints the inode of each namespace a pid is in. Every number
+# confine reports for itself must be one lsns agrees with.
+if command -v lsns >/dev/null 2>&1; then
+	bad=0
+	checked=0
+	for kind in cgroup ipc mnt net pid time user uts; do
+		mine=$(./confine | sed -n "s/^observed  ns_$kind  *\([0-9][0-9]*\).*/\1/p")
+		[ -n "$mine" ] || continue
+		theirs=$(lsns -n -o NS -t "$kind" -p $$ 2>/dev/null | tr -d ' ')
+		[ -n "$theirs" ] || continue
+		checked=$((checked + 1))
+		[ "$mine" = "$theirs" ] || { bad=$((bad + 1)); printf '        %s: confine %s, lsns %s\n' "$kind" "$mine" "$theirs"; }
+	done
+	if [ "$checked" -eq 0 ]; then
+		skip "lsns reported no namespaces for this shell"
+	elif [ "$bad" -eq 0 ]; then
+		ok "every namespace inode agrees with lsns ($checked kinds)"
+	else
+		nok "every namespace inode agrees with lsns" "$bad of $checked disagree"
+	fi
+else
+	skip "lsns is not installed, so the namespace oracle did not run"
+fi
+
+# --------------------------------- oracle: a namespace we made on purpose
+# unshare --uts changes exactly one namespace. confine has to report that
+# one as different and the rest as the same, which is a stronger claim
+# than "reports some numbers".
+if unshare --user --uts true 2>/dev/null; then
+	before=$(./confine | sed -n 's/^observed  ns_uts  *\([0-9][0-9]*\).*/\1/p')
+	after=$(unshare --user --uts ./confine |
+	        sed -n 's/^observed  ns_uts  *\([0-9][0-9]*\).*/\1/p')
+	if [ -n "$after" ] && [ "$before" != "$after" ]; then
+		ok "unshare --uts moves exactly the uts namespace, and confine sees it"
+	else
+		nok "unshare --uts moves exactly the uts namespace, and confine sees it" \
+		    "before [$before] after [$after]"
+	fi
+
+	same=$(unshare --user --uts ./confine |
+	       sed -n 's/^observed  ns_net  *\([0-9][0-9]*\).*/\1/p')
+	net=$(./confine | sed -n 's/^observed  ns_net  *\([0-9][0-9]*\).*/\1/p')
+	eq "and leaves the net namespace alone" "$net" "$same"
+
+	# Inspecting another process is the only case where the comparison
+	# means anything, so the target writes its own pid down. Finding it
+	# with pgrep picked up a stale sleep from an unrelated job and
+	# reported the wrong namespace as proof that this worked.
+	pf=$(mktemp)
+	unshare --user --uts sh -c "echo \$\$ > $pf; sleep 5" &
+	bg=$!
+	i=0
+	while [ ! -s "$pf" ] && [ $i -lt 50 ]; do i=$((i + 1)); sleep 0.1; done
+	target=$(cat "$pf" 2>/dev/null)
+	if [ -n "$target" ] && [ -d "/proc/$target" ]; then
+		got=$(./confine "$target" |
+		      sed -n 's/^observed  ns_uts  *[0-9][0-9]*  *//p')
+		eq "another process in its own uts namespace reads as differing" \
+		   "differs from this process" "$got"
+		got=$(./confine "$target" |
+		      sed -n 's/^observed  ns_net  *[0-9][0-9]*  *//p')
+		eq "and its net namespace, untouched, reads as the same" \
+		   "same as this process" "$got"
+	else
+		skip "could not start a target in its own namespace"
+	fi
+	kill $bg 2>/dev/null
+	wait $bg 2>/dev/null
+	rm -f "$pf"
+
+	# Self-inspection has nothing to compare against, and saying "same
+	# as this process" there is a tautology dressed as a fact.
+	got=$(./confine | sed -n 's/^observed  ns_uts  *[0-9][0-9]*  *//p')
+	eq "inspecting itself, confine offers no comparison" "" "$got"
+else
+	skip "unshare --user --uts is not permitted here"
+fi
+
+# The comparison it could not make has to be stated, not quietly skipped.
+if [ ! -r /proc/1/ns/mnt ]; then
+	case $(./confine) in
+	*"/proc/1/ns is not readable"*)
+		ok "says which comparison it made when init is unreadable" ;;
+	*)
+		nok "says which comparison it made when init is unreadable" ;;
+	esac
+fi
+
 # ------------------------------------------------------- seccomp reading
 # The mode names have to be right, and the line has to say what it does
 # NOT tell you. A filter count is not a policy.

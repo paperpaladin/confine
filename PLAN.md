@@ -75,10 +75,30 @@ those are attacker-controlled.
 - [x] 02 `confine PID`: capability sets and no_new_privs, observed
       why: the smallest complete fact, four bitmasks and a flag, with
            setpriv --dump as an oracle for the current process.
-- [ ] 03 namespaces: which of the eight, and whether each is shared with
+- [x] 03 namespaces: which of the eight, and whether each is shared with
       PID 1
       why: lsns gives inode numbers to compare against, and "shared with
            init" is the fact a reader actually wants.
+      files: confine.c t/run.sh
+      proves: all eight kinds plus the two _for_children links, with every
+              inode checked against lsns. unshare --user --uts moves
+              exactly one namespace and confine reports that one as moved
+              and the rest as unchanged.
+      found: "shared with init" is the fact a reader wants and it cannot
+             be had here: /proc/1/ns is not readable unprivileged, so the
+             comparison is against this process and the output says which
+             comparison it made. Claiming the first while measuring the
+             second would be the exact failure this project is shaped
+             against.
+             And comparing the target against ourselves is a tautology
+             when the target IS ourselves. The first version printed
+             "same as this process" for every namespace including one
+             unshare had just created, which reads like a fact. Self
+             inspection prints no comparison at all now.
+      note: the test for this first found its target with pgrep, which
+            picked up a stale sleep from an unrelated job and reported
+            the wrong namespace as proof that it worked. The target
+            writes its own pid to a file.
 - [ ] 04 seccomp mode and filter count, and what that does NOT tell you
       why: /proc says a filter exists and says nothing about what it
            permits, and the README has to say so before anyone trusts the
