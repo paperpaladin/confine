@@ -17,7 +17,7 @@ observed  no_new_privs   0
 observed  seccomp        0 (disabled), 0 filter(s) installed
 ```
 
-`make test`: **13 passed, 0 failed.**
+`make test`: **20 passed, 0 failed.**
 
 ## Why the first word of every line
 
@@ -70,9 +70,14 @@ kernel put in `/proc/self/status`.
 
 ## What does not work
 
-- Everything from item 03 onwards in `PLAN.md`. Namespaces, seccomp
-  policy, filesystem reach, mount namespaces, flatpak and systemd
-  cross-checks are all unwritten.
+- Everything from item 04 onwards in `PLAN.md`. Seccomp policy,
+  filesystem reach, mount namespaces, flatpak and systemd cross-checks
+  are all unwritten.
+- Whether a namespace is shared with PID 1 is the fact a reader wants,
+  and `/proc/1/ns` is not readable unprivileged, so it cannot be had.
+  Namespaces are compared against this process instead and the output
+  says which comparison it made. Inspecting this process, there is
+  nothing to compare against and no comparison is printed.
 - A seccomp filter count tells you a filter exists. It tells you nothing
   about which syscalls it permits, and there is no way to ask the kernel
   that from outside the process. The output says so on the line itself,
