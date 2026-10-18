@@ -19,6 +19,31 @@ observed  seccomp        0 (disabled), 0 filter(s) installed
 
 `make test`: **20 passed, 0 failed.**
 
+## seccomp: a filter count is not a policy
+
+`confine` reports the seccomp mode and how many filters a process has
+installed. Both come from `/proc/PID/status`, and both are facts.
+
+Neither tells you what the filters permit, and nothing outside the
+process can. `PTRACE_SECCOMP_GET_FILTER` retrieves the installed
+program, and it requires `CAP_SYS_ADMIN`; to an ordinary reader a
+filtered process is opaque. So a line saying `2 (filter), 2 filter(s)
+installed` means a filter exists and is being enforced. It does not
+mean the process is confined in any particular way, and a process can
+install a filter that permits every syscall there is.
+
+The suite checks that claim by making exactly such a process.
+`t/seccompd.c` installs permissive filters and waits, and the test
+requires `confine`'s output to contain no word implying it knows what
+any filter permits.
+
+It exists for a second reason. Until it did, every check of the
+seccomp line ran against a process with no filter: mode 0, count 0. A
+reader that printed `disabled, 0 filter(s)` unconditionally passed all
+of them. It installs two filters rather than one, because a reader
+that treats the presence of filtering as `1` is right for the common
+case and wrong here.
+
 ## Why the first word of every line
 
 There are three kinds of fact about a sandbox and they get confused

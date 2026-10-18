@@ -99,10 +99,29 @@ those are attacker-controlled.
             picked up a stale sleep from an unrelated job and reported
             the wrong namespace as proof that it worked. The target
             writes its own pid to a file.
-- [ ] 04 seccomp mode and filter count, and what that does NOT tell you
+- [x] 04 seccomp mode and filter count, and what that does NOT tell you
       why: /proc says a filter exists and says nothing about what it
            permits, and the README has to say so before anyone trusts the
            line.
+      done: the reading was already there; what was missing was anything
+           to read. Every check of the seccomp line ran against a process
+           with no filter at all, mode 0 and count 0, so a reader that
+           printed "disabled, 0 filter(s)" unconditionally passed all of
+           them.
+           t/seccompd.c installs a known number of permissive filters and
+           waits. Two filters and not one, because a reader that treats
+           the presence of filtering as 1 is right for the common case
+           and wrong here, and the kernel counts them separately for that
+           reason. It needs no privileges: PR_SET_NO_NEW_PRIVS makes an
+           unprivileged seccomp(2) legal, and no_new_privs being set is
+           asserted too, since the filter could not exist without it.
+           Three mutations, all caught, none of which the old check could
+           see: the count hardcoded to 1, mode 2 named strict, and the
+           mode always read as 0.
+           And the point of the item is its own case: the filters
+           installed permit everything, and confine's output is required
+           to contain no word suggesting it knows what any filter
+           permits.
 - [ ] 05 a constructed-process test rig: unshare and setpriv build a
       target with known confinement, confine reports it, the suite
       compares

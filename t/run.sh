@@ -11,6 +11,13 @@ cd "$(dirname "$0")/.."
 pass=0
 fail=0
 
+# A per-run scratch directory. Two concurrent runs of this suite would
+# otherwise share whatever fixed path was chosen, and the readiness
+# files below are exactly the kind of thing that goes wrong silently
+# when they do.
+TMP=$(mktemp -d) || exit 2
+trap 'rm -rf "$TMP"' EXIT INT TERM
+
 ok()   { pass=$((pass + 1)); printf 'ok    %s\n' "$1"; }
 nok()  { fail=$((fail + 1)); printf 'FAIL  %s\n' "$1"; [ $# -gt 1 ] && printf '        %s\n' "$2"; }
 skip() { printf 'SKIP  %s\n' "$1"; }
@@ -211,6 +218,66 @@ case $(./confine | sed -n 's/^observed  seccomp  *//p') in
 *"filter(s) installed"*) ok "the seccomp line names the mode and the filter count" ;;
 *) nok "the seccomp line names the mode and the filter count" ;;
 esac
+
+# --------------------------- oracle: a process whose filters we installed
+# Everything above about the seccomp line was checked against a process
+# with no filter: mode 0, count 0. A reader that printed "disabled, 0"
+# unconditionally passed every one of them. t/seccompd.c installs a
+# known number of permissive filters and waits, so the other case
+# exists.
+#
+# Two filters, not one. A reader that treats the presence of filtering
+# as "1" is right for the common case and wrong here, and the kernel
+# counts them separately for exactly that reason.
+if gcc -std=c11 -O1 -w -o "$TMP/seccompd" t/seccompd.c 2>/dev/null; then
+	for want in 1 2; do
+		"$TMP/seccompd" "$want" > "$TMP/ready.$want" 2>"$TMP/sderr.$want" &
+		sdpid=$!
+		i=0
+		while [ $i -lt 50 ]; do
+			grep -q '^ready ' "$TMP/ready.$want" 2>/dev/null && break
+			i=$((i + 1)); sleep 0.1
+		done
+		if ! grep -q '^ready ' "$TMP/ready.$want" 2>/dev/null; then
+			nok "the seccomp target started with $want filter(s)" \
+			    "$(head -1 "$TMP/sderr.$want" 2>/dev/null)"
+			kill "$sdpid" 2>/dev/null
+			continue
+		fi
+		line=$(./confine "$sdpid" | sed -n 's/^observed  seccomp  *//p')
+		nnp=$(./confine "$sdpid" | sed -n 's/^observed  no_new_privs  *//p')
+		# Killed by PID. `pkill -f seccompd` would match this script's
+		# own command line as well, which is how that reflex takes the
+		# suite down with the target.
+		kill "$sdpid" 2>/dev/null
+		wait "$sdpid" 2>/dev/null
+
+		eq "a process with $want filter(s) reports mode filter" \
+		   "2 (filter), $want filter(s) installed" "$line"
+		eq "and no_new_privs, which seccomp required to be set" "1" "$nnp"
+	done
+
+	# The whole point of the item: the count is not a policy. The
+	# filters installed above permit everything, and confine must not
+	# imply otherwise anywhere in its output.
+	"$TMP/seccompd" 1 > "$TMP/ready.p" 2>/dev/null &
+	sdpid=$!
+	i=0
+	while [ $i -lt 50 ]; do
+		grep -q '^ready ' "$TMP/ready.p" 2>/dev/null && break
+		i=$((i + 1)); sleep 0.1
+	done
+	out=$(./confine "$sdpid" 2>/dev/null)
+	kill "$sdpid" 2>/dev/null; wait "$sdpid" 2>/dev/null
+	if printf '%s' "$out" | grep -qiE 'syscall|permits|allows|denies|blocked'; then
+		nok "the seccomp line claims nothing about what the filter permits" \
+		    "$(printf '%s' "$out" | grep -iE 'syscall|permits|allows|denies|blocked' | head -2)"
+	else
+		ok "the seccomp line claims nothing about what the filter permits"
+	fi
+else
+	skip "could not build t/seccompd.c, so a filtered process was not read"
+fi
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
