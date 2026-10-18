@@ -2,3 +2,5 @@
 /caps.h
 /caps.h.new
 /scratch/
+/seccompd
+t/seccompd
